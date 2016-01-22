@@ -1,0 +1,39 @@
+#%RAML 0.8
+title: REST-Accepted-Pattern
+version: 1
+
+/tasks:
+  displayName: Tasks Resource
+  description: Collection Resource for Long Running Tasks
+  post:
+    description: Creates a New Task Instance Resource Kicking off a Long Running Task
+    responses:
+      202:
+        headers:
+          Location:
+            displayName: The Location of the Status Resource
+  /task/{taskId}:
+    get:
+      description: Returns the Result from the Long Running Task
+      responses:
+        200:
+          body:
+            application/xml:
+              example:  |
+                <task>
+                  <result>My Long Running Task Result</result>
+                </task>
+              schema: !include task-instance-schema.xsd
+  /task/status/{statusId}:
+    get:
+      description: Returns the Current Status of the Task
+      responses:
+        200:
+          body:
+            application/xml:
+              example: |
+                <status>
+                  <task>IN PROGRESS</task>
+                  <link></link>
+                </status>
+              schema: !include task-status-schema.xsd

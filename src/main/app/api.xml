@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:dw="http://www.mulesoft.org/schema/mule/ee/dw" xmlns:objectstore="http://www.mulesoft.org/schema/mule/objectstore" xmlns:scripting="http://www.mulesoft.org/schema/mule/scripting" xmlns:tracking="http://www.mulesoft.org/schema/mule/ee/tracking" xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:apikit="http://www.mulesoft.org/schema/mule/apikit" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:spring="http://www.springframework.org/schema/beans"
+	xmlns:vm="http://www.mulesoft.org/schema/mule/vm" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.mulesoft.org/schema/mule/vm http://www.mulesoft.org/schema/mule/vm/current/mule-vm.xsd
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/apikit http://www.mulesoft.org/schema/mule/apikit/current/mule-apikit.xsd
+http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.1.xsd
+http://www.mulesoft.org/schema/mule/ee/tracking http://www.mulesoft.org/schema/mule/ee/tracking/current/mule-tracking-ee.xsd
+http://www.mulesoft.org/schema/mule/scripting http://www.mulesoft.org/schema/mule/scripting/current/mule-scripting.xsd
+http://www.mulesoft.org/schema/mule/objectstore http://www.mulesoft.org/schema/mule/objectstore/current/mule-objectstore.xsd
+http://www.mulesoft.org/schema/mule/ee/data-mapper http://www.mulesoft.org/schema/mule/ee/data-mapper/current/mule-data-mapper.xsd
+http://www.mulesoft.org/schema/mule/ee/dw http://www.mulesoft.org/schema/mule/ee/dw/current/dw.xsd"
+	>
+	<http:listener-config name="api-httpListenerConfig"
+		host="localhost" port="8081" doc:name="HTTP Listener Configuration" />
+	<apikit:config name="api-config" raml="api.raml"
+		consoleEnabled="true" consolePath="console" doc:name="Router" />
+    <objectstore:config name="ObjectStore" doc:name="ObjectStore"/>
+	<apikit:mapping-exception-strategy
+		name="api-apiKitGlobalExceptionMapping">
+		<apikit:mapping statusCode="404">
+			<apikit:exception
+				value="org.mule.module.apikit.exception.NotFoundException" />
+			<set-property propertyName="Content-Type" value="application/json"
+				doc:name="Property" />
+			<set-payload
+				value="{ &quot;message&quot;: &quot;Resource not found&quot; }"
+				doc:name="Set Payload" />
+		</apikit:mapping>
+		<apikit:mapping statusCode="405">
+			<apikit:exception
+				value="org.mule.module.apikit.exception.MethodNotAllowedException" />
+			<set-property propertyName="Content-Type" value="application/json"
+				doc:name="Property" />
+			<set-payload
+				value="{ &quot;message&quot;: &quot;Method not allowed&quot; }"
+				doc:name="Set Payload" />
+		</apikit:mapping>
+		<apikit:mapping statusCode="415">
+			<apikit:exception
+				value="org.mule.module.apikit.exception.UnsupportedMediaTypeException" />
+			<set-property propertyName="Content-Type" value="application/json"
+				doc:name="Property" />
+			<set-payload
+				value="{ &quot;message&quot;: &quot;Unsupported media type&quot; }"
+				doc:name="Set Payload" />
+		</apikit:mapping>
+		<apikit:mapping statusCode="406">
+			<apikit:exception
+				value="org.mule.module.apikit.exception.NotAcceptableException" />
+			<set-property propertyName="Content-Type" value="application/json"
+				doc:name="Property" />
+			<set-payload value="{ &quot;message&quot;: &quot;Not acceptable&quot; }"
+				doc:name="Set Payload" />
+		</apikit:mapping>
+		<apikit:mapping statusCode="400">
+			<apikit:exception
+				value="org.mule.module.apikit.exception.BadRequestException" />
+			<set-property propertyName="Content-Type" value="application/json"
+				doc:name="Property" />
+			<set-payload value="{ &quot;message&quot;: &quot;Bad request&quot; }"
+				doc:name="Set Payload" />
+		</apikit:mapping>
+	</apikit:mapping-exception-strategy>
+	<flow name="api-main">
+		<http:listener config-ref="api-httpListenerConfig" path="/api/*"
+			doc:name="HTTP" />
+		<apikit:router config-ref="api-config" doc:name="APIkit Router" />
+		<exception-strategy ref="api-apiKitGlobalExceptionMapping"
+			doc:name="Reference Exception Strategy" />
+	</flow>
+	<flow name="post:/tasks:api-config">
+		<message-filter doc:name="Filter unwanted">
+            <not-filter>
+                <wildcard-filter pattern="/favicon.ico" caseSensitive="true"/>
+            </not-filter>
+		</message-filter>
+		<flow-ref name="location_header_generation" doc:name="Create Status Resource Location Header" />
+		<vm:outbound-endpoint exchange-pattern="one-way"
+			path="/accept" doc:name="Start Long Running Task" />
+		<set-payload
+			value="#['Accepted request. Check status resource for progress.']"
+			doc:name="Set Payload" />
+	</flow>
+    <flow name="LongRunningFlow">
+        <vm:inbound-endpoint exchange-pattern="one-way" path="/accept" doc:name="Transactional VM inbound">
+            <vm:transaction action="ALWAYS_BEGIN"/>
+        </vm:inbound-endpoint>
+        <scripting:component doc:name="Run 60 Seconds">
+            <scripting:script engine="Groovy"><![CDATA[Thread.sleep(60000);]]></scripting:script>
+        </scripting:component>
+        <objectstore:store config-ref="ObjectStore" key="#[sessionVars.uuid]" value-ref="#['Task Finished']" doc:name="ObjectStore"/>
+        <catch-exception-strategy doc:name="Catch Exception Strategy">
+            <objectstore:store config-ref="ObjectStore" key="#[sessionVars.uuid]" value-ref="#['Task Failed']" doc:name="ObjectStore"/>
+        </catch-exception-strategy>
+    </flow>
+	<flow name="get:/tasks/task/status/{statusId}:api-config">
+        <objectstore:contains config-ref="ObjectStore" key="#[flowVars.statusId]" doc:name="ObjectStore"/>
+        <choice doc:name="Choice">
+            <when expression="#[payload == true]">
+                <dw:transform-message doc:name="Transform Message">
+                    <dw:set-payload><![CDATA[%dw 1.0
+%output application/xml
+---
+{
+	status: {
+		task: "Finished",
+		link: "http://localhost:8081/api/tasks/task/" ++ flowVars.statusId
+	}
+}]]></dw:set-payload>
+                </dw:transform-message>
+            </when>
+            <otherwise>
+                <dw:transform-message doc:name="Transform Message">
+                    <dw:set-payload><![CDATA[%dw 1.0
+%output application/xml
+---
+{
+	status: {
+		task: "In Progress"
+	}
+}]]></dw:set-payload>
+                </dw:transform-message>
+            </otherwise>
+        </choice>
+	</flow>
+	<flow name="get:/tasks/task/{taskId}:api-config">
+        <objectstore:retrieve config-ref="ObjectStore" key="#[flowVars.taskId]" doc:name="ObjectStore"/>
+        <dw:transform-message doc:name="Transform Message">
+            <dw:set-payload><![CDATA[%dw 1.0
+%output application/xml
+---
+{
+	task: {
+		result: "Task with ID: " ++ flowVars.taskId ++ " Finished"
+	}
+}]]></dw:set-payload>
+        </dw:transform-message>
+	</flow>
+	<sub-flow name="location_header_generation">
+        <message-properties-transformer scope="session" doc:name="Generate UUID">
+            <add-message-property key="uuid" value="#[java.util.UUID.randomUUID().toString()]"/>
+        </message-properties-transformer>
+		<set-property propertyName="Location"
+			value="#[message.inboundProperties.'origin'+'/api/tasks/task/status/'+sessionVars.uuid]" doc:name="Location Header" />
+		<set-property propertyName="http.status" value="202"
+			doc:name="HTTP Status" />
+	</sub-flow>
+</mule>
